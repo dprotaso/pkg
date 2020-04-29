@@ -38,10 +38,6 @@ const (
 // ObservabilityConfig contains the configuration defined in the observability ConfigMap.
 // +k8s:deepcopy-gen=true
 type ObservabilityConfig struct {
-	// EnableVarLogCollection specifies whether the logs under /var/log/ should be available
-	// for collection on the host node by the fluentd daemon set.
-	EnableVarLogCollection bool
-
 	// LoggingURLTemplate is a string containing the logging url template where
 	// the variable REVISION_UID will be replaced with the created revision's UID.
 	LoggingURLTemplate string
@@ -71,9 +67,6 @@ func defaultConfig() *ObservabilityConfig {
 // NewObservabilityConfigFromConfigMap creates a ObservabilityConfig from the supplied ConfigMap
 func NewObservabilityConfigFromConfigMap(configMap *corev1.ConfigMap) (*ObservabilityConfig, error) {
 	oc := defaultConfig()
-	if evlc, ok := configMap.Data["logging.enable-var-log-collection"]; ok {
-		oc.EnableVarLogCollection = strings.EqualFold(evlc, "true")
-	}
 
 	if rut, ok := configMap.Data["logging.revision-url-template"]; ok {
 		oc.LoggingURLTemplate = rut
