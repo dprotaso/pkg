@@ -25,6 +25,9 @@ import (
 	"path"
 	"text/template"
 	"time"
+
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type Settings struct {
@@ -87,10 +90,10 @@ func (s *Settings) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&s.ImageTemplate, "env.image.template", "{{.Repository}}/{{.Name}}:{{.Tag}}",
 		"Provide a template to generate the reference to an image from the test. Defaults to `{{.Repository}}/{{.Name}}:{{.Tag}}`.")
 
-	fs.StringVar(&s.ImageTag, "tag", "latest", "Provide the version tag for the test images.")
+	fs.StringVar(&s.ImageTag, "env.image.tag", "latest", "Provide the version tag for the test images.")
 }
 
-func (s *Settings) ImagePath(name string) string {
+func (s Settings) ImagePath(name string) string {
 	tpl, err := template.New("image").Parse(s.ImageTemplate)
 	if err != nil {
 		panic("could not parse image template: " + err.Error())
@@ -109,4 +112,17 @@ func (s *Settings) ImagePath(name string) string {
 		panic("could not apply the image template: " + err.Error())
 	}
 	return buf.String()
+}
+
+func (s Settings) ClientConfig() *rest.Config {
+	overrides := &clientcmd.ConfigOverrides{}
+	overrides.Context.Cluster = s.Cluster
+
+	loader := &clientcmd.ClientConfigLoadingRules{ExplicitPath: s.KubeConfig}
+
+	c, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loader, overrides).ClientConfig()
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
