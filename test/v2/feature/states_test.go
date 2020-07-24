@@ -23,13 +23,12 @@ import (
 )
 
 var cases = []struct {
-	state     States
-	flag      string
-	stateFunc func(States, func())
+	state States
+	flag  string
 }{
-	{Alpha, "-feature.alpha", States.Alpha},
-	{Beta, "-feature.beta", States.Beta},
-	{Stable, "-feature.stable", States.Stable},
+	{Alpha, "-feature.alpha"},
+	{Beta, "-feature.beta"},
+	{Stable, "-feature.stable"},
 }
 
 func TestTurnOn(t *testing.T) {
@@ -64,19 +63,6 @@ func TestTurnOff(t *testing.T) {
 
 		if l&tc.state != 0 {
 			t.Errorf("flag %q did not disable %s", tc.flag, tc.state)
-		}
-	}
-}
-
-func TestInvocation(t *testing.T) {
-	for _, tc := range cases {
-		invoked := false
-		tc.stateFunc(tc.state, func() {
-			invoked = true
-		})
-
-		if !invoked {
-			t.Errorf("failed to invoke %s", tc.state)
 		}
 	}
 }

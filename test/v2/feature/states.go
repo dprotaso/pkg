@@ -42,16 +42,6 @@ const (
 	All = Alpha | Beta | Stable
 )
 
-func (s States) invoke(mask States, f func()) {
-	if s&mask != 0 {
-		f()
-	}
-}
-
-func (s States) Alpha(f func())  { s.invoke(Alpha, f) }
-func (s States) Beta(f func())   { s.invoke(Beta, f) }
-func (s States) Stable(f func()) { s.invoke(Stable, f) }
-
 func (s States) String() string {
 	var b strings.Builder
 

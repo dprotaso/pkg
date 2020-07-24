@@ -68,18 +68,6 @@ const (
 	All = Must | MustNot | Should | ShouldNot | May
 )
 
-func (l Levels) invoke(mask Levels, f func()) {
-	if l&mask != 0 {
-		f()
-	}
-}
-
-func (l Levels) Must(f func())      { l.invoke(Must, f) }
-func (l Levels) MustNot(f func())   { l.invoke(MustNot, f) }
-func (l Levels) Should(f func())    { l.invoke(Should, f) }
-func (l Levels) ShouldNot(f func()) { l.invoke(ShouldNot, f) }
-func (l Levels) May(f func())       { l.invoke(May, f) }
-
 func (l Levels) String() string {
 	var b strings.Builder
 

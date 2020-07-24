@@ -23,15 +23,14 @@ import (
 )
 
 var cases = []struct {
-	level     Levels
-	flag      string
-	levelFunc func(Levels, func())
+	level Levels
+	flag  string
 }{
-	{Must, "-requirement.must", Levels.Must},
-	{MustNot, "-requirement.mustnot", Levels.MustNot},
-	{Should, "-requirement.should", Levels.Should},
-	{ShouldNot, "-requirement.shouldnot", Levels.ShouldNot},
-	{May, "-requirement.may", Levels.May},
+	{Must, "-requirement.must"},
+	{MustNot, "-requirement.mustnot"},
+	{Should, "-requirement.should"},
+	{ShouldNot, "-requirement.shouldnot"},
+	{May, "-requirement.may"},
 }
 
 func TestTurnOn(t *testing.T) {
@@ -66,19 +65,6 @@ func TestTurnOff(t *testing.T) {
 
 		if l&tc.level != 0 {
 			t.Errorf("flag %q did not disable %s", tc.flag, tc.level)
-		}
-	}
-}
-
-func TestInvocation(t *testing.T) {
-	for _, tc := range cases {
-		invoked := false
-		tc.levelFunc(tc.level, func() {
-			invoked = true
-		})
-
-		if !invoked {
-			t.Errorf("failed to invoke %s", tc.level)
 		}
 	}
 }
