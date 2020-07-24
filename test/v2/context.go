@@ -79,13 +79,13 @@ func (t *T) ObjectNameForTest() string {
 }
 
 func (t *T) invoke(state feature.States, name string, f func(*T)) bool {
-	return t.T.Run(name, func(tt *testing.T) {
+	return t.T.Run(name, func(gotest *testing.T) {
 		if t.Features()&state == 0 {
-			t.Skipf("%s features not enabled for testing", state)
+			gotest.Skipf("%s features not enabled for testing", state)
 		}
 
 		newT := *t
-		newT.T = tt
+		newT.T = gotest
 		// Each test should have it's own client
 		newT.Config.ResetClients()
 
