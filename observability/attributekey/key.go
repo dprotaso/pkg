@@ -23,7 +23,7 @@ import (
 )
 
 type ValueType interface {
-	~string | ~bool | ~int64 | ~int | ~float64 |
+	string | bool | int64 | int | float64 |
 		[]string | []bool | []int64 | []int | []float64
 }
 
@@ -32,6 +32,8 @@ type (
 	String            = Type[string]
 	Bool              = Type[bool]
 	Int               = Type[int]
+	Int64             = Type[int64]
+	Float64           = Type[float64]
 )
 
 func (key Type[T]) With(val T) attribute.KeyValue {
@@ -59,7 +61,7 @@ func (key Type[T]) With(val T) attribute.KeyValue {
 	case []float64:
 		return attribute.Float64Slice(k, v)
 	default:
+		// note - this can't happen due to type constraints
 		panic(fmt.Sprintf("unsupported attribute type: %T", v))
 	}
-
 }
