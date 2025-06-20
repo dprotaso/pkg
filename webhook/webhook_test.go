@@ -39,13 +39,6 @@ func newDefaultOptions() Options {
 	}
 }
 
-func newCustomOptions() Options {
-	opts := newDefaultOptions()
-	opts.ServerPrivateKeyName = "tls.key"
-	opts.ServerCertificateName = "tls.cert"
-	return opts
-}
-
 const (
 	testResourceName = "test-resource"
 	user1            = "brutto@knative.dev"
@@ -71,6 +64,8 @@ func newNonRunningTestWebhook(t *testing.T, options Options, acs ...interface{})
 		ctxCancel()
 		stopCb()
 	}
+
+	// acs = slices.DeleteFunc(acs, func(a any) bool { return a == nil })
 
 	ac, err = New(ctx, acs)
 	if err != nil {
@@ -130,11 +125,4 @@ func TestTLSMinVersionWebhookOption(t *testing.T) {
 			t.Fatal("Admission Controller Webhook creation expected to fail due to unsupported TLS version")
 		}
 	})
-}
-
-type testContext struct {
-	webhook *Webhook
-	addr    string
-	ctx     context.Context
-	cancel  context.CancelFunc
 }
