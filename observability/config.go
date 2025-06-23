@@ -24,9 +24,11 @@ import (
 	"knative.dev/pkg/observability/tracing"
 )
 
-type TracingConfig = tracing.Config
-type MetricsConfig = metrics.Config
-type RuntimeConfig = runtime.Config
+type (
+	TracingConfig = tracing.Config
+	MetricsConfig = metrics.Config
+	RuntimeConfig = runtime.Config
+)
 
 type Config struct {
 	Tracing TracingConfig

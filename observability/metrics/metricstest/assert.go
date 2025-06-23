@@ -19,36 +19,53 @@ package metricstest
 import (
 	"context"
 	"strings"
-	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata/metricdatatest"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-type AssertFunc func(*testing.T, *metricdata.ResourceMetrics)
+type metricReader interface {
+	Collect(ctx context.Context, rm *metricdata.ResourceMetrics) error
+}
 
-func AssertMetrics(
-	t *testing.T,
-	reader *metric.ManualReader,
-	assertFns ...AssertFunc,
-) {
+type testingT interface {
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Fatalf(format string, args ...any)
+	Fatal(args ...any)
+	Helper()
+	Failed() bool
+}
+
+type AssertFunc func(testingT, *metricdata.ResourceMetrics)
+
+func AssertMetrics(t testingT, r metricReader, assertFns ...AssertFunc) {
 	t.Helper()
 
 	var rm metricdata.ResourceMetrics
-	reader.Collect(context.Background(), &rm)
+	r.Collect(context.Background(), &rm)
 
 	for _, assertFn := range assertFns {
 		assertFn(t, &rm)
 	}
 }
 
-func HasAttributes(scopePrefix string, metricPrefix string, want ...attribute.KeyValue) AssertFunc {
-	return func(t *testing.T, rm *metricdata.ResourceMetrics) {
+func HasAttributes(
+	scopePrefix string,
+	metricPrefix string,
+	want ...attribute.KeyValue,
+) AssertFunc {
+	return func(t testingT, rm *metricdata.ResourceMetrics) {
 		t.Helper()
+
+		assertCalled := false
+
+		if len(want) == 0 {
+			return
+		}
 
 		for _, sm := range rm.ScopeMetrics {
 			if !strings.HasPrefix(sm.Scope.Name, scopePrefix) {
@@ -59,25 +76,40 @@ func HasAttributes(scopePrefix string, metricPrefix string, want ...attribute.Ke
 				if !strings.HasPrefix(metric.Name, metricPrefix) {
 					continue
 				}
+
+				assertCalled = true
+
+				mt := t.(metricdatatest.TestingT)
 				switch data := metric.Data.(type) {
 				case metricdata.Sum[int64]:
-					metricdatatest.AssertHasAttributes(t, data, want...)
+					metricdatatest.AssertHasAttributes(mt, data, want...)
+				case metricdata.Sum[float64]:
+					metricdatatest.AssertHasAttributes(mt, data, want...)
 				case metricdata.Histogram[int64]:
-					metricdatatest.AssertHasAttributes(t, data, want...)
+					metricdatatest.AssertHasAttributes(mt, data, want...)
 				case metricdata.Histogram[float64]:
-					metricdatatest.AssertHasAttributes(t, data, want...)
+					metricdatatest.AssertHasAttributes(mt, data, want...)
+				case metricdata.ExponentialHistogram[int64]:
+					metricdatatest.AssertHasAttributes(mt, data, want...)
+				case metricdata.ExponentialHistogram[float64]:
+					metricdatatest.AssertHasAttributes(mt, data, want...)
+				case metricdata.Gauge[int64]:
+					metricdatatest.AssertHasAttributes(mt, data, want...)
 				case metricdata.Gauge[float64]:
-					metricdatatest.AssertHasAttributes(t, data, want...)
+					metricdatatest.AssertHasAttributes(mt, data, want...)
 				default:
 					t.Fatalf("unsupported metric data type for metric %q: %T", metric.Name, data)
 				}
 			}
 		}
+		if !assertCalled {
+			t.Error("expected attributes but scope and metric prefix didn't match any results")
+		}
 	}
 }
 
 func MetricsPresent(scopeName string, names ...string) AssertFunc {
-	return func(t *testing.T, rm *metricdata.ResourceMetrics) {
+	return func(t testingT, rm *metricdata.ResourceMetrics) {
 		t.Helper()
 
 		want := sets.New(names...)

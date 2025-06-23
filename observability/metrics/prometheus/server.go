@@ -49,18 +49,13 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		host: defaultPrometheusHost,
 		port: defaultPrometheusPort,
 	}
-	fmt.Printf("%#v", o)
 
 	for _, opt := range opts {
 		opt(&o)
 	}
 
-	fmt.Printf("%#v", o)
-
 	envOverride(&o.host, prometheusHostEnvName)
 	envOverride(&o.port, prometheusPortEnvName)
-
-	fmt.Printf("%#v", o)
 
 	if err := validate(&o); err != nil {
 		return nil, err
@@ -93,20 +88,20 @@ type options struct {
 	port string
 }
 
-func WitHost(host string) ServerOption {
+func WithHost(host string) ServerOption {
 	return func(o *options) {
 		o.host = host
 	}
 }
 
-func WitPort(port string) ServerOption {
+func WithPort(port string) ServerOption {
 	return func(o *options) {
 		o.port = port
 	}
 }
 
 func validate(o *options) error {
-	port, err := strconv.ParseInt(o.port, 10, 16)
+	port, err := strconv.ParseUint(o.port, 10, 16)
 	if err != nil {
 		return fmt.Errorf("prometheus port %q could not be parsed as a port number: %w",
 			o.port, err)

@@ -131,7 +131,7 @@ func intervalFor(cfg Config) sdkmetric.PeriodicReaderOption {
 
 	// Use the configuration's export interval if it's non-zero and there isn't
 	// an environment override
-	if os.Getenv("OTEL_METRIC_EXPORT_INTERVAL") != "" && cfg.ExportInterval != 0 {
+	if os.Getenv("OTEL_METRIC_EXPORT_INTERVAL") == "" && cfg.ExportInterval != 0 {
 		interval = sdkmetric.WithInterval(cfg.ExportInterval)
 	}
 
@@ -142,10 +142,9 @@ func intervalFor(cfg Config) sdkmetric.PeriodicReaderOption {
 func endpointFor[T any](cfg Config, opt func(string) T) T {
 	var epOption T
 
-	if (os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
-		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "") && cfg.Endpoint != "" {
+	if (os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" &&
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") == "") && cfg.Endpoint != "" {
 		epOption = opt(cfg.Endpoint)
 	}
-
 	return epOption
 }

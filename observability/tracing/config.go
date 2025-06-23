@@ -17,6 +17,9 @@ limitations under the License.
 package tracing
 
 import (
+	"errors"
+	"fmt"
+
 	configmap "knative.dev/pkg/configmap/parser"
 )
 
@@ -32,6 +35,32 @@ type Config struct {
 	SamplingRate float64
 }
 
+func (c *Config) Validate() error {
+	switch c.Protocol {
+	case ProtocolGRPC,
+		ProtocolHTTPProtobuf,
+		ProtocolNone:
+	default:
+		return fmt.Errorf("unsupported protocol %q", c.Protocol)
+	}
+
+	if c.Protocol == ProtocolNone && len(c.Endpoint) > 0 {
+		return errors.New("endpoint should not be set when protocol is 'none'")
+	}
+
+	if c.Protocol != ProtocolNone && len(c.Endpoint) == 0 {
+		return fmt.Errorf("endpoint should be set for protocol %q", c.Protocol)
+	}
+
+	if c.SamplingRate < 0 {
+		return fmt.Errorf("sampling rate %f should be greater or equal to zero", c.SamplingRate)
+	} else if c.SamplingRate > 1.0 {
+		return fmt.Errorf("sampling rate %f should be less than or equal to one", c.SamplingRate)
+
+	}
+	return nil
+}
+
 func DefaultConfig() Config {
 	return Config{
 		Protocol: ProtocolNone,
@@ -44,8 +73,27 @@ func NewFromMap(m map[string]string) (Config, error) {
 	err := configmap.Parse(m,
 		configmap.As("tracing-protocol", &c.Protocol),
 		configmap.As("tracing-endpoint", &c.Endpoint),
-		configmap.As("tracing-export-interval", &c.Endpoint),
+		configmap.As("tracing-sampling-rate", &c.SamplingRate),
 	)
 
-	return c, err
+	if err != nil {
+		return c, err
+	}
+
+	return c, c.Validate()
+}
+
+func NewFromMapWithPrefix(prefix string, m map[string]string) (Config, error) {
+	c := DefaultConfig()
+
+	err := configmap.Parse(m,
+		configmap.As(prefix+"tracing-protocol", &c.Protocol),
+		configmap.As(prefix+"tracing-endpoint", &c.Endpoint),
+		configmap.As(prefix+"tracing-sampling-rate", &c.SamplingRate),
+	)
+	if err != nil {
+		return c, err
+	}
+
+	return c, c.Validate()
 }

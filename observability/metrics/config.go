@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"fmt"
 	"time"
 
 	configmap "knative.dev/pkg/configmap/parser"
@@ -36,6 +37,30 @@ type Config struct {
 	ExportInterval time.Duration
 }
 
+func (c *Config) Validate() error {
+	switch c.Protocol {
+	case ProtocolGRPC,
+		ProtocolHTTPProtobuf,
+		ProtocolNone,
+		ProtocolPrometheus:
+	default:
+		return fmt.Errorf("unsupported protocol %q", c.Protocol)
+	}
+
+	if c.Protocol == ProtocolNone || c.Protocol == ProtocolPrometheus {
+		if len(c.Endpoint) > 0 {
+			return fmt.Errorf("endpoint should not be set when protocol is %q", c.Protocol)
+		}
+	} else if len(c.Endpoint) == 0 {
+		return fmt.Errorf("endpoint should be set when protocol is %q", c.Protocol)
+	}
+
+	if c.ExportInterval < 0 {
+		return fmt.Errorf("export interval %q should be greater than zero", c.ExportInterval)
+	}
+	return nil
+}
+
 func DefaultConfig() Config {
 	return Config{
 		Protocol: ProtocolNone,
@@ -43,13 +68,20 @@ func DefaultConfig() Config {
 }
 
 func NewFromMap(m map[string]string) (Config, error) {
+	return NewFromMapWithPrefix("", m)
+}
+
+func NewFromMapWithPrefix(prefix string, m map[string]string) (Config, error) {
 	c := DefaultConfig()
 
 	err := configmap.Parse(m,
-		configmap.As("metrics-protocol", &c.Protocol),
-		configmap.As("metrics-endpoint", &c.Endpoint),
-		configmap.As("metrics-export-interval", &c.Endpoint),
+		configmap.As(prefix+"metrics-protocol", &c.Protocol),
+		configmap.As(prefix+"metrics-endpoint", &c.Endpoint),
+		configmap.As(prefix+"metrics-export-interval", &c.ExportInterval),
 	)
+	if err != nil {
+		return c, err
+	}
 
-	return c, err
+	return c, c.Validate()
 }

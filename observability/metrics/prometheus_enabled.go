@@ -28,7 +28,7 @@ import (
 	"knative.dev/pkg/observability/metrics/prometheus"
 )
 
-func buildPrometheus(ctx context.Context, cfg Config) (sdkmetric.Reader, shutdownFunc, error) {
+func buildPrometheus(_ context.Context, cfg Config) (sdkmetric.Reader, shutdownFunc, error) {
 	r, err := otelprom.New()
 	if err != nil {
 		return nil, noopFunc, fmt.Errorf("unable to create otel prometheus exporter: %w", err)
@@ -46,8 +46,8 @@ func buildPrometheus(ctx context.Context, cfg Config) (sdkmetric.Reader, shutdow
 		}
 
 		opts = append(opts,
-			prometheus.WitHost(host),
-			prometheus.WitPort(port),
+			prometheus.WithHost(host),
+			prometheus.WithPort(port),
 		)
 	}
 

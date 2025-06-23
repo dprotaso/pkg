@@ -17,6 +17,7 @@ limitations under the License.
 package runtime
 
 import (
+	"fmt"
 	"time"
 
 	configmap "knative.dev/pkg/configmap/parser"
@@ -30,6 +31,19 @@ const (
 type Config struct {
 	Profiling      string
 	ExportInterval time.Duration
+}
+
+func (c *Config) Validate() error {
+	switch c.Profiling {
+	case ProfilingEnabled, ProfilingDisabled:
+	default:
+		return fmt.Errorf("unsupported profile setting %q", c.Profiling)
+	}
+
+	if c.ExportInterval < 0 {
+		return fmt.Errorf("export interval %q should be greater than zero", c.ExportInterval)
+	}
+	return nil
 }
 
 func (c *Config) ProfilingEnabled() bool {
@@ -48,9 +62,13 @@ func NewFromMap(m map[string]string) (Config, error) {
 	c := DefaultConfig()
 
 	err := configmap.Parse(m,
-		configmap.As("runtime-protocol", &c.Profiling),
+		configmap.As("runtime-profiling", &c.Profiling),
 		configmap.As("runtime-export-interval", &c.ExportInterval),
 	)
 
-	return c, err
+	if err != nil {
+		return c, err
+	}
+
+	return c, c.Validate()
 }
