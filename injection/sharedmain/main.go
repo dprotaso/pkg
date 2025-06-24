@@ -30,8 +30,10 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.32.0"
 
 	"go.uber.org/automaxprocs/maxprocs" // automatically set GOMAXPROCS based on cgroups
@@ -59,6 +61,7 @@ import (
 	o11yconfigmap "knative.dev/pkg/observability/configmap"
 	"knative.dev/pkg/observability/metrics"
 	"knative.dev/pkg/observability/metrics/globalviews"
+	"knative.dev/pkg/observability/tracing"
 	"knative.dev/pkg/reconciler"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
@@ -277,10 +280,15 @@ func MainWithConfig(ctx context.Context, component string, cfg *rest.Config, cto
 			leaderElectionConfig.GetComponentConfig(component))
 	}
 
-	mp := SetupObservabilityOrDie(ctx, component, logger, pprof)
+	mp, tp := SetupObservabilityOrDie(ctx, component, logger, pprof)
 	defer func() {
 		if err := mp.Shutdown(context.Background()); err != nil {
 			logger.Errorw("Error flushing metrics", zap.Error(err))
+		}
+	}()
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			logger.Errorw("Error flushing traces", zap.Error(err))
 		}
 	}()
 
@@ -361,10 +369,7 @@ func SetupLoggerOrDie(ctx context.Context, component string) (*zap.SugaredLogger
 	}
 	l, level := logging.NewLoggerFromConfig(loggingConfig, component)
 
-	// If PodName is injected into the env vars, set it on the logger.
-	// This is needed for HA components to distinguish logs from different
-	// pods.
-	if pn := os.Getenv("POD_NAME"); pn != "" {
+	if pn := getPodName(); pn != "" {
 		l = l.With(zap.String(logkey.Pod, pn))
 	}
 
@@ -378,7 +383,7 @@ func SetupObservabilityOrDie(
 	component string,
 	logger *zap.SugaredLogger,
 	pprof *pprofServer,
-) *metrics.MeterProvider {
+) (*metrics.MeterProvider, *tracing.TracerProvider) {
 	cfg, err := GetObservabilityConfig(ctx)
 	if err != nil {
 		logger.Fatal("Error loading observability configuration: ", err)
@@ -386,17 +391,9 @@ func SetupObservabilityOrDie(
 
 	pprof.UpdateFromConfig(cfg.Runtime)
 
-	// Ignore the error because it complains about semconv
-	// schema version differences
-	resource, _ := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(component),
-			semconv.ServiceVersion(changeset.Get()),
-		))
+	resource := getResource(component)
 
-	provider, err := metrics.NewMeterProvider(
+	meterProvider, err := metrics.NewMeterProvider(
 		ctx,
 		cfg.Metrics,
 		metric.WithView(globalviews.GetAllViews()...),
@@ -404,20 +401,33 @@ func SetupObservabilityOrDie(
 	)
 
 	if err != nil {
-		logger.Fatalw("Failed to initialize metrics provider", zap.Error(err))
+		logger.Fatalw("Failed to setup meter provider", zap.Error(err))
 	}
 
-	otel.SetMeterProvider(provider)
+	otel.SetMeterProvider(meterProvider)
 
 	err = runtime.Start(
 		runtime.WithMinimumReadMemStatsInterval(cfg.Runtime.ExportInterval),
 	)
 
 	if err != nil {
-		logger.Fatalw("Failed to runtime metrics", zap.Error(err))
+		logger.Fatalw("Failed to start runtime metrics", zap.Error(err))
 	}
 
-	return provider
+	tracerProvider, err := tracing.NewTracerProvider(
+		ctx,
+		cfg.Tracing,
+		trace.WithResource(resource),
+	)
+
+	if err != nil {
+		logger.Fatalw("Failed to setup trace provider", zap.Error(err))
+	}
+
+	otel.SetTextMapPropagator(tracing.DefaultTextMapPropagator())
+	otel.SetTracerProvider(tracerProvider)
+
+	return meterProvider, tracerProvider
 }
 
 // CheckK8sClientMinimumVersionOrDie checks that the hosting Kubernetes cluster
@@ -488,13 +498,13 @@ func WatchObservabilityConfigOrDie(
 func ControllersAndWebhooksFromCtors(ctx context.Context,
 	cmw *cminformer.InformedWatcher,
 	ctors ...injection.ControllerConstructor,
-) ([]*controller.Impl, []interface{}) {
+) ([]*controller.Impl, []any) {
 	// Check whether the context has been infused with a leader elector builder.
 	// If it has, then every reconciler we plan to start MUST implement LeaderAware.
 	leEnabled := leaderelection.HasLeaderElection(ctx)
 
 	controllers := make([]*controller.Impl, 0, len(ctors))
-	webhooks := make([]interface{}, 0)
+	webhooks := make([]any, 0)
 	for _, cf := range ctors {
 		ctrl := cf(ctx, cmw)
 		controllers = append(controllers, ctrl)
@@ -513,4 +523,46 @@ func ControllersAndWebhooksFromCtors(ctx context.Context,
 	}
 
 	return controllers, webhooks
+}
+
+func getPodName() string {
+	// If PodName is injected into the env vars, set it on the logger.
+	// This is needed for HA components to distinguish logs from different
+	// pods.
+	if val := os.Getenv("POD_NAME"); val != "" {
+		return val
+	}
+
+	// CRI-O and containerd set HOSTNAME to the Pod Name.
+	// This seems to be K8s behaviour - originating from
+	// older docker behaviour
+	if val := os.Getenv("HOSTNAME"); val != "" {
+		return val
+	}
+	return ""
+}
+
+func getResource(component string) *resource.Resource {
+	attrs := []attribute.KeyValue{
+		semconv.K8SNamespaceName(system.Namespace()),
+		semconv.ServiceName(component),
+		semconv.ServiceVersion(changeset.Get()),
+	}
+
+	if pn := getPodName(); pn != "" {
+		attrs = append(attrs, semconv.K8SPodName(pn))
+	}
+
+	// Ignore the error because it complains about semconv
+	// schema version differences
+	resource, _ := resource.Merge(
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			attrs...,
+		),
+		// We merge 'Default' last since this allows overriding
+		// the service name using env variables
+		resource.Default(),
+	)
+	return resource
 }

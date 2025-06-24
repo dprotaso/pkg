@@ -1,0 +1,168 @@
+/*
+Copyright 2025 The Knative Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package tracing
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+)
+
+type shutdownFunc func(ctx context.Context) error
+
+func noopFunc(context.Context) error { return nil }
+
+type TracerProvider struct {
+	trace.TracerProvider
+	shutdown []shutdownFunc
+}
+
+func (m *TracerProvider) Shutdown(ctx context.Context) error {
+	var errs []error
+	for _, shutdown := range m.shutdown {
+		if err := shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func DefaultTextMapPropagator() propagation.TextMapPropagator {
+	return propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+}
+func NewTracerProvider(
+	ctx context.Context,
+	cfg Config,
+	opts ...sdktrace.TracerProviderOption,
+) (*TracerProvider, error) {
+
+	if cfg.Protocol == ProtocolNone {
+		return &TracerProvider{TracerProvider: noop.NewTracerProvider()}, nil
+	}
+
+	exp, shutdown, err := exporterFor(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error creating tracer exporter: %w", err)
+	}
+
+	sampler, err := sampleFor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error creating tracer sampler: %w", err)
+	}
+
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithSampler(sampler),
+	)
+	return &TracerProvider{
+		TracerProvider: provider,
+		shutdown:       []shutdownFunc{provider.Shutdown, shutdown},
+	}, nil
+}
+
+func exporterFor(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+	switch cfg.Protocol {
+	case ProtocolGRPC:
+		otlptracegrpc.New(ctx)
+		return buildGRPC(ctx, cfg)
+	case ProtocolHTTPProtobuf:
+		return buildHTTP(ctx, cfg)
+	default:
+		return nil, noopFunc, fmt.Errorf("unsupported metric exporter: %q", cfg.Protocol)
+	}
+}
+
+func buildGRPC(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+	var grpcOpts []otlptracegrpc.Option
+
+	if opt := endpointFor(cfg, otlptracegrpc.WithEndpoint); opt != nil {
+		grpcOpts = append(grpcOpts, opt)
+	}
+
+	exporter, err := otlptracegrpc.New(ctx, grpcOpts...)
+	if err != nil {
+		return nil, noopFunc, fmt.Errorf("failed to build exporter: %w", err)
+	}
+	return exporter, exporter.Shutdown, nil
+}
+
+func buildHTTP(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+	var httpOpts []otlptracehttp.Option
+
+	if opt := endpointFor(cfg, otlptracehttp.WithEndpoint); opt != nil {
+		httpOpts = append(httpOpts, opt)
+	}
+
+	exporter, err := otlptracehttp.New(ctx, httpOpts...)
+	if err != nil {
+		return nil, noopFunc, fmt.Errorf("failed to build exporter: %w", err)
+	}
+
+	return exporter, exporter.Shutdown, nil
+}
+
+// If the OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+func endpointFor[T any](cfg Config, opt func(string) T) T {
+	var epOption T
+
+	if (os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" &&
+		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "") && cfg.Endpoint != "" {
+		epOption = opt(cfg.Endpoint)
+	}
+	return epOption
+}
+
+func sampleFor(cfg Config) (sdktrace.Sampler, error) {
+	// Don't override env arg
+	if os.Getenv("OTEL_TRACES_SAMPLER") != "" {
+		return nil, nil
+	}
+
+	rate := cfg.SamplingRate
+
+	if val := os.Getenv("OTEL_TRACES_SAMPLER_ARG"); val != "" {
+		override, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse sample rate override: %w", err)
+		}
+
+		rate = override
+	}
+
+	if rate >= 1.0 {
+		return sdktrace.AlwaysSample(), nil
+	}
+
+	if cfg.SamplingRate <= 0.0 {
+		return sdktrace.NeverSample(), nil
+	}
+
+	root := sdktrace.TraceIDRatioBased(cfg.SamplingRate)
+	return sdktrace.ParentBased(root), nil
+}
