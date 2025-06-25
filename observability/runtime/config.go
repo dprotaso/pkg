@@ -65,7 +65,6 @@ func NewFromMap(m map[string]string) (Config, error) {
 		configmap.As("runtime-profiling", &c.Profiling),
 		configmap.As("runtime-export-interval", &c.ExportInterval),
 	)
-
 	if err != nil {
 		return c, err
 	}

@@ -56,12 +56,12 @@ func DefaultTextMapPropagator() propagation.TextMapPropagator {
 		propagation.Baggage{},
 	)
 }
+
 func NewTracerProvider(
 	ctx context.Context,
 	cfg Config,
 	opts ...sdktrace.TracerProviderOption,
 ) (*TracerProvider, error) {
-
 	if cfg.Protocol == ProtocolNone {
 		return &TracerProvider{TracerProvider: noop.NewTracerProvider()}, nil
 	}

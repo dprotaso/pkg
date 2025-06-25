@@ -56,7 +56,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sampling rate %f should be greater or equal to zero", c.SamplingRate)
 	} else if c.SamplingRate > 1.0 {
 		return fmt.Errorf("sampling rate %f should be less than or equal to one", c.SamplingRate)
-
 	}
 	return nil
 }
@@ -75,7 +74,6 @@ func NewFromMap(m map[string]string) (Config, error) {
 		configmap.As("tracing-endpoint", &c.Endpoint),
 		configmap.As("tracing-sampling-rate", &c.SamplingRate),
 	)
-
 	if err != nil {
 		return c, err
 	}

@@ -26,7 +26,7 @@ func TestNewProfilingHandler(t *testing.T) {
 	h := NewProfilingHandler()
 
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "/debug/pprof/", nil)
+	r, _ := http.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	h.ServeHTTP(w, r)
 
 	resp := w.Result()
