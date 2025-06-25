@@ -18,7 +18,6 @@ package tracing
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -37,17 +36,11 @@ func noopFunc(context.Context) error { return nil }
 
 type TracerProvider struct {
 	trace.TracerProvider
-	shutdown []shutdownFunc
+	shutdown func(context.Context) error
 }
 
 func (m *TracerProvider) Shutdown(ctx context.Context) error {
-	var errs []error
-	for _, shutdown := range m.shutdown {
-		if err := shutdown(ctx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return m.shutdown(ctx)
 }
 
 func DefaultTextMapPropagator() propagation.TextMapPropagator {
@@ -63,10 +56,13 @@ func NewTracerProvider(
 	opts ...sdktrace.TracerProviderOption,
 ) (*TracerProvider, error) {
 	if cfg.Protocol == ProtocolNone {
-		return &TracerProvider{TracerProvider: noop.NewTracerProvider()}, nil
+		return &TracerProvider{
+			TracerProvider: noop.NewTracerProvider(),
+			shutdown:       noopFunc,
+		}, nil
 	}
 
-	exp, shutdown, err := exporterFor(ctx, cfg)
+	exp, err := exporterFor(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating tracer exporter: %w", err)
 	}
@@ -82,11 +78,11 @@ func NewTracerProvider(
 	)
 	return &TracerProvider{
 		TracerProvider: provider,
-		shutdown:       []shutdownFunc{provider.Shutdown, shutdown},
+		shutdown:       provider.Shutdown,
 	}, nil
 }
 
-func exporterFor(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+func exporterFor(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
 	switch cfg.Protocol {
 	case ProtocolGRPC:
 		otlptracegrpc.New(ctx)
@@ -94,11 +90,11 @@ func exporterFor(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdo
 	case ProtocolHTTPProtobuf:
 		return buildHTTP(ctx, cfg)
 	default:
-		return nil, noopFunc, fmt.Errorf("unsupported metric exporter: %q", cfg.Protocol)
+		return nil, fmt.Errorf("unsupported metric exporter: %q", cfg.Protocol)
 	}
 }
 
-func buildGRPC(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+func buildGRPC(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
 	var grpcOpts []otlptracegrpc.Option
 
 	if opt := endpointFor(cfg, otlptracegrpc.WithEndpoint); opt != nil {
@@ -107,12 +103,12 @@ func buildGRPC(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdown
 
 	exporter, err := otlptracegrpc.New(ctx, grpcOpts...)
 	if err != nil {
-		return nil, noopFunc, fmt.Errorf("failed to build exporter: %w", err)
+		return nil, fmt.Errorf("failed to build exporter: %w", err)
 	}
-	return exporter, exporter.Shutdown, nil
+	return exporter, nil
 }
 
-func buildHTTP(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdownFunc, error) {
+func buildHTTP(ctx context.Context, cfg Config) (sdktrace.SpanExporter, error) {
 	var httpOpts []otlptracehttp.Option
 
 	if opt := endpointFor(cfg, otlptracehttp.WithEndpoint); opt != nil {
@@ -121,10 +117,10 @@ func buildHTTP(ctx context.Context, cfg Config) (sdktrace.SpanExporter, shutdown
 
 	exporter, err := otlptracehttp.New(ctx, httpOpts...)
 	if err != nil {
-		return nil, noopFunc, fmt.Errorf("failed to build exporter: %w", err)
+		return nil, fmt.Errorf("failed to build exporter: %w", err)
 	}
 
-	return exporter, exporter.Shutdown, nil
+	return exporter, nil
 }
 
 // If the OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT

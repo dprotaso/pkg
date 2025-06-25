@@ -100,7 +100,7 @@ func TestTracerProviderShutdown(t *testing.T) {
 		return want
 	}
 
-	p := TracerProvider{shutdown: []shutdownFunc{shutdown}}
+	p := TracerProvider{shutdown: shutdown}
 	got := p.Shutdown(context.Background())
 
 	if !invoked {
